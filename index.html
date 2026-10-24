@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inspection Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--ink:#1c2630;--mut:#6b7783;--bg:#f3f5f4;--card:#fff;--line:#dfe4e2;--acc:#0b6b5f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,sans-serif}
+header{background:var(--ink);color:#fff;padding:14px 22px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+header h1{margin:0;font-size:19px}header small{color:#aab6c0}
+main{max-width:1280px;margin:0 auto;padding:16px}
+.bar{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select,input{font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink)}
+button{cursor:pointer}button.on,.chip.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.chip{padding:3px 10px;border-radius:99px;border:1px solid var(--line);cursor:pointer;background:#fff}
+details{position:relative}summary{cursor:pointer;padding:5px 9px;border:1px solid var(--line);border-radius:5px;background:#fff;list-style:none}
+.opts{position:absolute;z-index:5;background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:280px;overflow:auto;min-width:230px;box-shadow:0 6px 18px #0002}
+.opts label{display:flex;gap:6px;padding:2px 0;white-space:nowrap}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.k{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px}.k b{display:block;font-size:26px;line-height:1.1}.k span{color:var(--mut);font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;overflow:auto}.card h2{margin:0 0 8px;font-size:15px}
+.chartbox{position:relative;height:280px}.wide{grid-column:1/-1}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:600;position:sticky;top:0;background:#fff}
+td.n{text-align:right}a{color:var(--acc)}.warn{color:#b45309}.mut{color:var(--mut)}
+</style></head><body>
+<header><div><h1>Inspection Tracker</h1><small id="meta">Loading…</small></div>
+<div><input id="csvlink" placeholder="Paste CSV link, then Load" size="26"> <button id="loadlink">Load</button> <input type="file" id="file" accept=".csv" title="Load a CSV exported from the Jobs tab"> <button id="refresh">Refresh</button></div></header>
+<main>
+<div class="bar" id="presets"></div>
+<div class="bar" id="filters">
+ <input type="date" id="from"> to <input type="date" id="to">
+ <input id="q" placeholder="Search address, job ref, title" size="26">
+ <span id="multis" style="display:contents"></span>
+ <select id="source"><option value="">Source: all</option><option>Date list</option><option>Routine</option></select>
+ <select id="status"><option value="">Status: active</option><option>Open</option><option>Done</option><option>Cancelled</option><option>Duplicate</option><option>Ignored</option></select>
+ <label><input type="checkbox" id="incl"> include cancelled / duplicate / ignored</label>
+ <label><input type="checkbox" id="issues"> data issues only</label>
+ <button id="clear">Clear all</button> <button data-exp="kpi">Export KPIs</button>
+</div>
+<div class="bar" id="types"></div>
+<div class="kpis" id="kpis"></div>
+<div class="grid">
+ <div class="card wide"><h2>Inspections per day <span class="mut">(stacked by type, line = 7 working-day average)</span> <button data-exp="day">CSV</button></h2><div class="chartbox"><canvas id="cDay"></canvas></div></div>
+ <div class="card"><h2>By inspector <span class="mut">(click to filter)</span> <button data-exp="insp">CSV</button></h2><div class="chartbox"><canvas id="cInsp"></canvas></div></div>
+ <div class="card"><h2>Agencies by type <select id="agMode"><option value="top">Top 12</option><option value="bot">Bottom 12</option></select> <button data-exp="ag">CSV</button></h2><div class="chartbox"><canvas id="cAg"></canvas></div></div>
+ <div class="card"><h2>Report type mix <button data-exp="type">CSV</button></h2><div class="chartbox"><canvas id="cType"></canvas></div></div>
+ <div class="card"><h2>Average per weekday <button data-exp="dow">CSV</button></h2><div class="chartbox"><canvas id="cDow"></canvas></div></div>
+ <div class="card wide"><h2>Agency breakdown by report type <button id="expAg">Export CSV</button></h2><div id="agTable" style="max-height:420px;overflow:auto"></div></div>
+ <div class="card wide"><h2>Inspections <span class="mut" id="cnt"></span> <button id="exp">Export CSV</button></h2><div id="list" style="max-height:520px;overflow:auto"></div><button id="more" style="margin-top:8px">Show more</button></div>
+ <div class="card wide"><details id="dq"><summary id="dqS">Data quality</summary><button data-exp="dq">Export CSV</button><p class="mut">To fix a row, edit its title in Basecamp, or add its To-do ID to the Overrides tab of the sheet. This page is read-only.</p><div id="dqT" style="max-height:360px;overflow:auto"></div></details></div>
+</div></main>
+<script>
+const CSV_URL = "";            // paste your published Google Sheets CSV link here (or use ?csv=LINK, or the file button)
+const TZ = "Australia/Perth";
+const ALIAS = {};              // e.g. {"Porter Matthews Metro":"Porter Matthews"} to merge name variants
+const TYPES = ["PCR","PCR PHOTOS ONLY","INVENTORY","FINAL BOND","ROUTINE"];
+const COL = {PCR:"#2563eb","PCR PHOTOS ONLY":"#0d9488",INVENTORY:"#7c3aed","FINAL BOND":"#d97706",ROUTINE:"#db2777"};
+const EXCL = ["Cancelled","Duplicate","Ignored"], MON = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+const MULTI = [["inspector","Inspector"],["agency","Agency"],["manager","Manager"],["size","Size"]];
+let rows = [], F, shown = 100, charts = {};
+const $ = id => document.getElementById(id);
+const todayISO = () => new Intl.DateTimeFormat("en-CA",{timeZone:TZ}).format(new Date());
+const add = (d,n) => {const t=new Date(d+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)};
+const dow = d => new Date(d+"T00:00:00Z").getUTCDay();
+const PRE = {"All time":()=>["",""],Today:t=>[t,t],Yesterday:t=>[add(t,-1),add(t,-1)],"This week":t=>[add(t,-((dow(t)+6)%7)),t],
+ "Last 7 days":t=>[add(t,-6),t],"Last 14 days":t=>[add(t,-13),t],"This month":t=>[t.slice(0,8)+"01",t],
+ "Last month":t=>{const e=add(t.slice(0,8)+"01",-1);return [e.slice(0,8)+"01",e]},"Next 7 days":t=>[t,add(t,7)],Upcoming:t=>[t,""]};
+const reset = () => F = {from:"",to:"",q:"",source:"",status:"",incl:false,issues:false,preset:"All time",sel:{inspector:new Set(),agency:new Set(),manager:new Set(),size:new Set(),type:new Set()}};
+const tc = s => {s=String(s||"").trim();return s&&s===s.toUpperCase()?s.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()):s};
+const al = s => ALIAS[s] || s;
+function pd(s){s=String(s||"");let m=s.match(/(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})/);
+ if(m)return m[3]+"-"+String(MON[m[2].toLowerCase()]||0).padStart(2,"0")+"-"+m[1].padStart(2,"0");
+ m=s.match(/^\d{4}-\d{2}-\d{2}/);return m?m[0]:""}
+function load(){const u=new URLSearchParams(location.search).get("csv")||localStorage.getItem("csvlink")||CSV_URL;
+ if(!u){$("meta").textContent="No data yet: paste your CSV link in the box above, or choose a CSV file.";return}
+ $("meta").textContent="Loading data…";
+ const fail=m=>$("meta").textContent="Could not load data: "+m+" (link used ends: ..."+u.slice(-45)+"). Check the link, or use Choose File with a CSV downloaded from the Jobs tab.";
+ Papa.parse(u,{download:true,header:true,skipEmptyLines:true,
+  complete:r=>{if(!r.meta.fields||!r.meta.fields.includes("Date"))return fail("that link did not return the Jobs CSV");init(r.data)},
+  error:e=>fail(location.protocol==="file:"?"this page was opened as a file. Open http://localhost:8000 instead (see README)":((e&&e.message)||"network or CORS error"))})}
+window.addEventListener("error",e=>{$("meta").textContent="Script error: "+e.message});
+function init(data){rows=data.map(r=>({...r,d:pd(r.Date),inspector:al(tc(r.Inspector)),agency:al(tc(r.Agency)),manager:tc(r.Manager),
+ type:(r.Type||"PCR").trim().toUpperCase(),size:String(r.Size||"").trim().toUpperCase().replace(/^0X0$/,""),status:(r.Status||"Open").trim(),
+ source:r.Source||"",chk:r.Check||""})).filter(r=>r.d);
+ $("meta").textContent=rows.length+" rows loaded · today (Perth) "+todayISO()+" · refreshed "+new Date().toLocaleTimeString();render()}
+function pass(r,skip){const s=F.sel;
+ if(F.status?r.status!==F.status:(!F.incl&&EXCL.includes(r.status)))return false;
+ if(F.from&&r.d<F.from||F.to&&r.d>F.to)return false;
+ if(F.source&&r.source!==F.source)return false;
+ if(F.issues&&!r.chk)return false;
+ for(const k in s)if(k!==skip&&s[k].size&&!s[k].has(r[k]))return false;
+ if(F.q&&!(r.Address+" "+r["Job ref"]+" "+r["Raw title"]).toLowerCase().includes(F.q))return false;return true}
+const by = (a,f) => a.reduce((o,r)=>{const k=f(r);o[k]=(o[k]||0)+1;return o},{});
+const sortE = o => Object.entries(o).sort((a,b)=>b[1]-a[1]);
+function toggle(k,v){const s=F.sel[k];s.has(v)?s.delete(v):s.add(v);render()}
+function chart(id,cfg){charts[id]&&charts[id].destroy();cfg.options={maintainAspectRatio:false,animation:false,...cfg.options};charts[id]=new Chart($(id),cfg)}
+function render(){
+ const fr=rows.filter(r=>pass(r));window.views={};
+ $("multis").innerHTML="";
+ MULTI.forEach(([k,l])=>{const c=sortE(by(rows.filter(r=>pass(r,k)&&r[k]),r=>r[k])),sel=F.sel[k],d=document.createElement("details");
+  d.innerHTML=`<summary>${l}${sel.size?" ("+sel.size+")":""}</summary><div class="opts">`+c.map(([v,n])=>`<label><input type="checkbox" ${sel.has(v)?"checked":""} data-k="${k}" data-v="${v.replace(/"/g,"&quot;")}"> ${v} <span class="mut">${n}</span></label>`).join("")+"</div>";
+  $("multis").appendChild(d)});
+ $("multis").querySelectorAll("input").forEach(i=>i.onchange=()=>toggle(i.dataset.k,i.dataset.v));
+ const tc2=by(rows.filter(r=>pass(r,"type")),r=>r.type);
+ $("types").innerHTML="Type: "+TYPES.map(t=>`<span class="chip ${F.sel.type.has(t)?"on":""}" data-t="${t}">${t} (${tc2[t]||0})</span>`).join(" ")+
+  `<span class="mut" style="margin-left:auto">excluded: ${EXCL.map(e=>rows.filter(r=>r.status===e).length+" "+e.toLowerCase()).join(" · ")}</span>`;
+ $("types").querySelectorAll(".chip").forEach(c=>c.onclick=()=>toggle("type",c.dataset.t));
+ const fr2=fr.filter(r=>!F.sel.type.size||F.sel.type.has(r.type));
+ const days=by(fr2,r=>r.d),dk=Object.keys(days).sort(),ins=sortE(by(fr2,r=>r.inspector)),ag=sortE(by(fr2,r=>r.agency)),busy=sortE(days)[0],done=fr2.filter(r=>r.status==="Done").length;
+ const kp=[[fr2.length,"Total inspections"],[dk.length?(fr2.length/dk.length).toFixed(1):0,"Average per working day"],
+  [busy?busy[1]:0,"Busiest day"+(busy?" ("+busy[0]+")":"")],[ins.length,"Active inspectors"],[ag.length,"Active agencies"],
+  [fr2.length?Math.round(done/fr2.length*100)+"%":"0%","Done"],[ins[0]?ins[0][0]:"-","Top inspector"+(ins[0]?" ("+ins[0][1]+")":"")]];$("kpis").innerHTML=kp.map(([v,l])=>`<div class="k"><b>${v}</b><span>${l}</span></div>`).join("");window.views.kpi=[["Metric","Value"],...kp.map(([v,l])=>[l,v])];
+ chart("cDay",{data:{labels:dk,datasets:[...TYPES.map(t=>({type:"bar",label:t,stack:"s",backgroundColor:COL[t],data:dk.map(d=>fr2.filter(r=>r.d===d&&r.type===t).length)})),
+  {type:"line",label:"7-day avg",borderColor:"#1c2630",pointRadius:0,tension:.3,data:dk.map((_,i)=>{const w=dk.slice(Math.max(0,i-6),i+1);return +(w.reduce((a,d)=>a+days[d],0)/w.length).toFixed(1)})}]},
+  options:{scales:{x:{stacked:true},y:{stacked:true}},plugins:{legend:{position:"bottom"}}}});
+ const bar=(id,e,k)=>chart(id,{type:"bar",data:{labels:e.map(x=>x[0]),datasets:[{data:e.map(x=>x[1]),backgroundColor:e.map(x=>F.sel[k].has(x[0])?"#0b6b5f":"#7fb0a8")}]},
+  options:{indexAxis:"y",plugins:{legend:{display:false}},onClick:(ev,el,ch)=>el.length&&toggle(k,ch.data.labels[el[0].index])}});
+ bar("cInsp",ins,"inspector");
+ const am=$("agMode").value,agl=(am==="top"?ag.slice(0,12):ag.slice(-12).reverse());
+ chart("cAg",{type:"bar",data:{labels:agl.map(x=>x[0]),datasets:TYPES.map(t=>({label:t,backgroundColor:COL[t],data:agl.map(([a])=>fr2.filter(r=>r.agency===a&&r.type===t).length)}))},
+  options:{indexAxis:"y",scales:{x:{stacked:true},y:{stacked:true}},plugins:{legend:{position:"bottom"}},onClick:(ev,el,ch)=>el.length&&toggle("agency",ch.data.labels[el[0].index])}});
+ const tt=by(fr2,r=>r.type);
+ chart("cType",{type:"doughnut",data:{labels:TYPES,datasets:[{data:TYPES.map(t=>tt[t]||0),backgroundColor:TYPES.map(t=>COL[t])}]},
+  options:{plugins:{legend:{position:"right"}},onClick:(ev,el,ch)=>el.length&&toggle("type",ch.data.labels[el[0].index])}});
+ const dn=[0,0,0,0,0,0,0],dc=[0,0,0,0,0,0,0];dk.forEach(d=>{dn[dow(d)]+=days[d];dc[dow(d)]++});
+ chart("cDow",{type:"bar",data:{labels:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],datasets:[{data:dn.map((n,i)=>dc[i]?+(n/dc[i]).toFixed(1):0),backgroundColor:"#0b6b5f"}]},options:{plugins:{legend:{display:false}}}});
+ const mx=Math.max(1,...ag.flatMap(([a])=>TYPES.map(t=>fr2.filter(r=>r.agency===a&&r.type===t).length)));
+ window.agRows=ag.map(([a,n])=>[a,...TYPES.map(t=>fr2.filter(r=>r.agency===a&&r.type===t).length),n,(n/fr2.length*100).toFixed(1)+"%"]);
+ $("agTable").innerHTML="<table><tr><th>Agency</th>"+TYPES.map(t=>`<th class=n>${t}</th>`).join("")+"<th class=n>Total</th><th class=n>%</th></tr>"+
+  window.agRows.map(r=>`<tr><td>${r[0]}</td>`+r.slice(1,6).map(n=>`<td class=n style="background:rgba(11,107,95,${n/mx*.3})">${n||""}</td>`).join("")+`<td class=n><b>${r[6]}</b></td><td class=n>${r[7]}</td></tr>`).join("")+
+  `<tr><td><b>Total</b></td>`+TYPES.map(t=>`<td class=n><b>${tt[t]||0}</b></td>`).join("")+`<td class=n><b>${fr2.length}</b></td><td></td></tr></table>`;
+ const V=window.views;
+ V.day=[["Date",...TYPES,"Total","7-day avg"],...dk.map((d,i)=>{const w=dk.slice(Math.max(0,i-6),i+1);return [d,...TYPES.map(t=>fr2.filter(r=>r.d===d&&r.type===t).length),days[d],+(w.reduce((a,x)=>a+days[x],0)/w.length).toFixed(1)]})];
+ V.insp=[["Inspector","Inspections","Days worked","Avg per day worked",...TYPES],...ins.map(([n,c])=>{const dd=new Set(fr2.filter(r=>r.inspector===n).map(r=>r.d)).size;return [n,c,dd,+(c/dd).toFixed(1),...TYPES.map(t=>fr2.filter(r=>r.inspector===n&&r.type===t).length)]})];
+ V.ag=[["Agency",...TYPES,"Total","%"],...window.agRows];
+ V.type=[["Type","Inspections","%"],...TYPES.map(t=>[t,tt[t]||0,fr2.length?((tt[t]||0)/fr2.length*100).toFixed(1)+"%":"0%"])];
+ V.dow=[["Weekday","Total inspections","Days with jobs","Average per day"],...["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((n,i)=>[n,dn[i],dc[i],dc[i]?+(dn[i]/dc[i]).toFixed(1):0])];
+ const sorted=[...fr2].sort((a,b)=>b.d.localeCompare(a.d)||a.inspector.localeCompare(b.inspector));window.cur=sorted;V.list=[["Date","Inspector","Agency","Manager","Address","Type","Size","Job ref","Status","Source","Note","Link"],...sorted.map(r=>[r.d,r.inspector,r.agency,r.manager,r.Address,r.type,r.size,r["Job ref"]||"",r.status,r.source,r.Note||"",r.Link])];
+ $("cnt").textContent="("+sorted.length+")";
+ $("list").innerHTML="<table><tr><th>Date</th><th>Inspector</th><th>Agency</th><th>Manager</th><th>Address</th><th>Type</th><th>Size</th><th>Job ref</th><th>Status</th><th></th></tr>"+
+  sorted.slice(0,shown).map(r=>`<tr><td>${r.d}</td><td>${r.inspector}</td><td>${r.agency}</td><td>${r.manager}</td><td>${r.Address}</td><td>${r.type}</td><td>${r.size}</td><td>${r["Job ref"]||""}</td><td>${r.status}</td><td><a href="${r.Link}" target="_blank" rel="noopener">Basecamp</a></td></tr>`).join("")+"</table>";
+ $("more").style.display=sorted.length>shown?"":"none";
+ const dq=rows.filter(r=>r.chk&&(F.incl||!EXCL.includes(r.status)));
+ V.dq=[["Check","Raw title","Date","To-do ID","Link"],...dq.map(r=>[r.chk,r["Raw title"],r.d,r["To-do ID"],r.Link])];
+ $("dqS").textContent="Data quality: "+dq.length+" rows to check";
+ $("dqT").innerHTML="<table><tr><th>Check</th><th>Raw title</th><th>Date</th><th>To-do ID</th><th></th></tr>"+dq.map(r=>`<tr><td class=warn>${r.chk}</td><td>${r["Raw title"]}</td><td>${r.d}</td><td><button data-id="${r["To-do ID"]}">Copy ${r["To-do ID"]}</button></td><td><a href="${r.Link}" target="_blank" rel="noopener">Open</a></td></tr>`).join("")+"</table>";
+ $("dqT").querySelectorAll("button").forEach(b=>b.onclick=()=>navigator.clipboard.writeText(b.dataset.id));
+ $("presets").innerHTML="Period: "+Object.keys(PRE).map(p=>`<span class="chip ${F.preset===p?"on":""}" data-p="${p}">${p}</span>`).join(" ");
+ $("presets").querySelectorAll(".chip").forEach(c=>c.onclick=()=>{[F.from,F.to]=PRE[c.dataset.p](todayISO());F.preset=c.dataset.p;sync();render()});
+}
+function sync(){$("from").value=F.from;$("to").value=F.to}
+function csv(a,name){const b=new Blob([Papa.unparse(a,{escapeFormulae:true})],{type:"text/csv"}),l=document.createElement("a");l.href=URL.createObjectURL(b);l.download=name;l.click()}
+reset();
+$("from").onchange=()=>{F.from=$("from").value;F.preset="";render()};$("to").onchange=()=>{F.to=$("to").value;F.preset="";render()};
+$("q").oninput=e=>{F.q=e.target.value.toLowerCase();render()};
+["source","status"].forEach(k=>$(k).onchange=e=>{F[k]=e.target.value;render()});
+["incl","issues"].forEach(k=>$(k).onchange=e=>{F[k]=e.target.checked;render()});
+$("agMode").onchange=render;$("refresh").onclick=load;$("loadlink").onclick=()=>{const v=$("csvlink").value.trim();if(v){localStorage.setItem("csvlink",v);load()}};$("more").onclick=()=>{shown+=200;render()};
+$("clear").onclick=()=>{reset();["q","source","status"].forEach(k=>$(k).value="");["incl","issues"].forEach(k=>$(k).checked=false);sync();render()};
+$("exp").onclick=()=>csv(window.cur.map(r=>({Date:r.d,Inspector:r.inspector,Agency:r.agency,Manager:r.manager,Address:r.Address,Type:r.type,Size:r.size,"Job ref":r["Job ref"],Status:r.status,Link:r.Link})),"inspections.csv");
+$("expAg").onclick=()=>csv([["Agency",...TYPES,"Total","%"],...window.agRows],"agency-by-type.csv");
+$("file").onchange=e=>Papa.parse(e.target.files[0],{header:true,skipEmptyLines:true,complete:r=>init(r.data)});
+document.addEventListener("click",e=>{document.querySelectorAll("#multis details[open]").forEach(d=>{if(!d.contains(e.target))d.open=false})});
+document.addEventListener("click",e=>{const b=e.target.closest("[data-exp]");if(b&&window.views&&window.views[b.dataset.exp])csv(window.views[b.dataset.exp],b.dataset.exp+"_"+(F.from||"all")+"_to_"+(F.to||"all")+".csv")});
+load();setInterval(load,600000);
+</script></body></html>
